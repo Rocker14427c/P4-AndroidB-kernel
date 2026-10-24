@@ -1,0 +1,88 @@
+# SPDX-License-Identifier: GPL-2.0
+# Reproducible stock-equivalent kernel build for realme P4 5G (RMX5110, MT6878).
+# Runs fully locally (no remote caches, no secrets). Both forks are public,
+# so the vendor checkout needs no token.
+name: p4-kernel-build
+
+on:
+  push:
+    branches: [p4/ci-build]
+    paths:
+      - '.github/workflows/p4-kernel-build.yml'
+      - 'ci/**'
+  workflow_dispatch:
+    inputs:
+      variant:
+        description: 'Build variant'
+        required: true
+        default: 'user'
+        type: choice
+        options: [user, userdebug]
+
+env:
+  # Keep the large working set on the runner's big /mnt disk.
+  ROOT: /mnt/buildroot
+  STORE_DIR: /mnt/prebuilts-store
+  VARIANT: ${{ github.event.inputs.variant || 'user' }}
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+    steps:
+      - name: Free disk space
+        run: |
+          df -h / /mnt
+          sudo rm -rf /opt/hostedtoolcache /usr/local/lib/android /usr/share/dotnet /var/lib/docker
+          df -h / /mnt
+
+      - name: Add swap (8 GiB)
+        run: |
+          sudo fallocate -l 8G /mnt/swapfile
+          sudo chmod 600 /mnt/swapfile
+          sudo mkswap /mnt/swapfile
+          sudo swapon /mnt/swapfile
+          free -h
+
+      - name: Checkout kernel fork
+        uses: actions/checkout@v4
+        with:
+          ref: p4/ci-build
+          path: kernel-src
+          fetch-depth: 1
+
+      - name: Checkout vendor fork
+        uses: actions/checkout@v4
+        with:
+          repository: Rocker14427c/P4-AndroidB-vendor-source
+          ref: master
+          path: vendor-src
+          fetch-depth: 1
+
+      - name: Fetch pinned prebuilts
+        run: kernel-src/ci/fetch_prebuilts.sh
+
+      - name: Assemble bazel workspace
+        run: VENDOR_SRC="$PWD/vendor-src" kernel-src/ci/assemble_workspace.sh
+
+      - name: Build kernel and vendor modules
+        run: kernel-src/ci/build.sh
+
+      - name: Package dist
+        if: always()
+        run: |
+          mkdir -p uploads
+          if [ -d "$ROOT/dist" ]; then
+            tar -C "$ROOT" -czf uploads/p4-kernel-dist.tar.gz dist
+          fi
+          tar -C "$ROOT" -czf uploads/p4-build-logs.tar.gz logs || true
+          ls -lh uploads/
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: p4-kernel-${{ github.run_number }}
+          path: uploads/
+          retention-days: 30
+          if-no-files-found: error
