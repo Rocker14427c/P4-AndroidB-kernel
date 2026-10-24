@@ -74,6 +74,11 @@ fetch bazel "${PIN_BAZEL}"
 fetch jdk11 "${PIN_JDK11}"
 # Hermetic host toolchain only needs the NDK sysroot (see kleaf/ndk.BUILD).
 fetch ndk-r23 "${PIN_NDK_R23}" toolchains/llvm/prebuilt/linux-x86_64/sysroot
+# Only the sysroot subtree is needed (the hermetic-tools glob follows the
+# build/kernel/build-tools/sysroot symlink into this project).
+fetch gcc-host "${PIN_GCC}" sysroot
+# Linux host tools only, skip darwin.
+fetch clang-tools "${PIN_CLANG_TOOLS}" linux-x86
 fetch bazel_common_rules "${PIN_BAZEL_COMMON_RULES}"
 mkdir -p "${STORE_DIR}/external"
 fetch external/bazel-skylib "${PIN_SKYLIB}"

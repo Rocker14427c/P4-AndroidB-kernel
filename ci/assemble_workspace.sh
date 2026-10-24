@@ -31,7 +31,8 @@ echo "workspace =${K}"
 [ -d "${STORE_DIR}/clang/clang-r487747c" ] || { echo "ERROR: run fetch_prebuilts.sh first" >&2; exit 1; }
 
 mkdir -p "${K}/build" "${K}/prebuilts/clang/host" "${K}/prebuilts/bazel" \
-         "${K}/prebuilts/jdk" "${K}/external/python" "${K}/tools" \
+         "${K}/prebuilts/jdk" "${K}/prebuilts/gcc/linux-x86/host" \
+         "${K}/external/python" "${K}/tools" \
          "${K}/vendor" "${WP}/vendor"
 
 link() { ln -sfn "$1" "$2"; }
@@ -61,6 +62,8 @@ link "${STORE_DIR}/kernel-build-tools"               "${K}/prebuilts/kernel-buil
 link "${STORE_DIR}/bazel"                            "${K}/prebuilts/bazel/linux-x86_64"
 link "${STORE_DIR}/jdk11"                            "${K}/prebuilts/jdk/jdk11"
 link "${STORE_DIR}/ndk-r23"                          "${K}/prebuilts/ndk-r23"
+link "${STORE_DIR}/gcc-host"                        "${K}/prebuilts/gcc/linux-x86/host/x86_64-linux-glibc2.17-4.8"
+link "${STORE_DIR}/clang-tools"                      "${K}/prebuilts/clang-tools"
 
 # --- external Bazel repositories (local checkouts) -------------------------
 link "${STORE_DIR}/external/bazel-skylib"            "${K}/external/bazel-skylib"
