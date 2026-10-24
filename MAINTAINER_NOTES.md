@@ -25,15 +25,38 @@ Newest entries at the top. Never put credentials in this file.
 - Env: `KERNEL_VERSION=kernel-6.1`, `OPLUS_PLATFORM_INFO=k6878v1_64` (harness defaults to k6989 — override), `CHIPSET_COMPANY=MTK`, `KERNEL_BUILD_VARIANT=user`, `BAZEL_DO_NOT_DETECT_CPP_TOOLCHAIN=1`, remote caches disabled.
 - Do NOT use `oplus_setup.sh`/`oplus_build.sh` unmodified (hardcoded k6989, missing MTK dct/device trees, internal image server). Drive Bazel directly.
 
-### Pinned toolchain (to be installed Phase 1)
-- Clang/LLVM: **r487747c** — source pin: `build.config.constants` (`CLANG_VERSION=r487747c`, `BRANCH=android14-6.1`).
-- Also required (not in published repos, fetch from android.googlesource.com, record checksum):
-  `prebuilts/clang/host/linux-x86` (kleaf versions.bzl must agree with r487747c — verify),
-  `prebuilts/bazel/linux-x86_64`, `prebuilts/jdk/jdk11`, `prebuilts/build-tools`, `prebuilts/kernel-build-tools`.
-- Download URL: _to fill in Phase 1_ · SHA-256: _to fill in Phase 1_
+### Pinned toolchain (resolved Phase 1, 2026-10-24)
+All prebuilts come from android.googlesource.com, manifest branch
+`main-kernel-build-2023` (per AOSP kernel manifest common-android14-6.1),
+checked out at exact hashes recorded in `ci/pins.env`. Clang r487747c is
+confirmed both by `build.config.constants` and by the prebuilts'
+`kleaf/versions.bzl` (single VERSIONS entry).
+- platform/prebuilts/clang/host/linux-x86 @382db94f (sparse: clang-r487747c, kleaf)
+- platform/prebuilts/build-tools @4649614b
+- kernel/prebuilts/build-tools (kernel-build-tools) @e905be25
+- platform/prebuilts/bazel/linux-x86_64 @7bfbec9e (bazel symlink -> bazel_nojdk binary)
+- platform/prebuilts/jdk/jdk11 @649eec44
+- toolchain/prebuilts/ndk/r23 @19ac7e4e (sparse: hermetic sysroot only)
+- platform/prebuilts/gcc/linux-x86/host/x86_64-linux-glibc2.17-4.8 @f6d40532 (sysroot only)
+- platform/prebuilts/clang-tools @f08a96e4 (linux-x86 only)
+- platform/build/bazel_common_rules @62c496cd; external bazel-skylib/stardoc/absl-py pinned in ci/pins.env
+- SHA-256 of key binaries: written to prebuilts-store/SHA256SUMS by fetch_prebuilts.sh
 
-### Exact build commands
-- _Phase 1 pending — first successful build will be recorded here verbatim._
+### Exact build commands (reproducible)
+CI: push to branch `p4/ci-build` (kernel fork) triggers
+`.github/workflows/p4-kernel-build.yml` on GitHub-hosted ubuntu-22.04
+(4 vCPU, 16 GiB RAM, 8 GiB swap added, working set on /mnt). No secrets.
+Local (WSL2, same scripts):
+```
+VENDOR_SRC=$PWD/../vendor-src ci/fetch_prebuilts.sh
+VENDOR_SRC=$PWD/../vendor-src ci/assemble_workspace.sh   # needs sudo for bind mounts
+ci/build.sh                                              # VARIANT=userdebug optional
+ci/unmount_workspace.sh
+```
+Vendor-side required adaptation (branch p4/ci-build in vendor fork):
+mgk_64_k61.bzl drops the absent out-of-tree fpsgo_cus/fpsgo_int labels;
+in-tree fpsgo_v3 (mtk_fpsgo.ko) remains in the device module list.
+First green run: _pending (run 40077687796 in progress at note time)_.
 
 ### Known gaps
 - Prebuilts absent from source repos (toolchain, bazel, jdk, host tools).
