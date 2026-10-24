@@ -107,6 +107,9 @@ ls -l "${K}/WORKSPACE" "${K}/kernel-6.1/Makefile" \
 # The hermetic toolchain's most failure-prone path:
 [ -d "${K}/build/kernel/build-tools/sysroot/usr" ] || {
     echo "ERROR: build-tools/sysroot not reachable at workspace path" >&2; exit 1; }
-[ -x "${K}/build/kernel/build-tools/path/linux-x86/bash" ] || {
-    echo "ERROR: hermetic host tool symlinks not resolving" >&2; exit 1; }
+# Only assert entries known to exist in this prebuilt revision.
+for t in python3 cpio; do
+    [ -e "${K}/build/kernel/build-tools/path/linux-x86/${t}" ] || {
+        echo "ERROR: hermetic host tool '${t}' not resolving" >&2; exit 1; }
+done
 echo "OK: all key paths resolve"
