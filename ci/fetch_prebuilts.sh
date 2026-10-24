@@ -47,7 +47,12 @@ fetch() {
     git -C "${dest}" remote add origin "${AOSP_GIT}/${project}"
     if [ "$#" -gt 0 ]; then
         git -C "${dest}" config core.sparseCheckout true
-        git -C "${dest}" sparse-checkout set "$@"
+        # Deep nested paths need non-cone patterns; simple directory names
+        # can use the cheaper cone mode.
+        case "$*" in
+            *"*"*) git -C "${dest}" sparse-checkout set --no-cone "$@" ;;
+            *)     git -C "${dest}" sparse-checkout set "$@" ;;
+        esac
     fi
     # Pinned hash is the branch head today; fetch by branch first (cheap),
     # then verify we landed on the exact pinned commit.
@@ -73,7 +78,7 @@ fetch kernel-build-tools "${PIN_KERNEL_BUILD_TOOLS}"
 fetch bazel "${PIN_BAZEL}"
 fetch jdk11 "${PIN_JDK11}"
 # Hermetic host toolchain only needs the NDK sysroot (see kleaf/ndk.BUILD).
-fetch ndk-r23 "${PIN_NDK_R23}" toolchains/llvm/prebuilt/linux-x86_64/sysroot
+fetch ndk-r23 "${PIN_NDK_R23}" '/toolchains/llvm/prebuilt/linux-x86_64/sysroot/**'
 # Only the sysroot subtree is needed (the hermetic-tools glob follows the
 # build/kernel/build-tools/sysroot symlink into this project).
 fetch gcc-host "${PIN_GCC}" sysroot
