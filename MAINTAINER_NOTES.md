@@ -5,6 +5,70 @@ Newest entries at the top. Never put credentials in this file.
 
 ---
 
+## Phase 1 — clean unmodified build GREEN (2026-10-24)
+
+GitHub Actions run **40093351089** on branch `p4/ci-build`, variant `user`,
+conclusion **success**, one dispatched command (`workflow_dispatch`) from a
+fresh clone. Build phase bazel elapsed 4045 s, dist phase 49 s; 1667 actions.
+
+Output (dist tar inside CI artifact `p4-kernel-12.zip`, 910,975,272 bytes,
+artifact id 12561812768, zip SHA-256
+`1d6905ce60f739ca10ea2be956d3c38ce7947e5a137f59abb34e9cdd5dab66e8`):
+- `kernel_device_modules-6.1/mgk_64_k61_kernel_aarch64.user/`: `vmlinux`,
+  `System.map`, `Image`, `Image.lz4`, `Image.gz`, `modules.builtin`,
+  `vmlinux.symvers` + in-tree GKI modules.
+- `kernel_device_modules-6.1/mgk_64_k61_customer_modules_install.user/`:
+  customer/vendor modules; **1164 `*.ko` total** in dist.
+- `mgk_64_k61.user_all_module_names` module manifest.
+- Spot-checked present: `oplus_chg_v2.ko`, `mt6375-charger.ko`,
+  `mt6375-battery.ko`, `snd-smartpa-aw883xx.ko`, `snd-soc-frsm-i2ca.ko`.
+
+### Why the published source did not build out-of-the-box for k6878
+The published harness (`oplus_setup.sh`) hardcodes k6989 and exports
+`DEFCONFIG_OVERLAYS=""`. Every `if "oplus6878.config" in DEFCONFIG_OVERLAYS`
+block in `mgk_64_k61.bzl` is therefore dormant, and the k6878 platform was
+also missing from two platform-keyed selectors. Fixes, all on vendor branch
+`p4/ci-build` (6 commits over baseline `e0563891`):
+1. `56c2b698` — drop absent out-of-tree fpsgo DDK labels (published subset).
+2. `c1f2dfac` — charger v2 Makefile: always add the `mediatek_v2` DRM include
+   path under `CONFIG_OPLUS_CHARGER_MTK` (fixes `mtk_panel_ext.h` not found;
+   matches the DDK build's copts).
+3. `b04b43ca` — `build/bazel_mgk_rules/mgk.bzl`: add k6878 case to the
+   defconfig-fragment platform selector so `kernel/configs/oplus6878.config`
+   actually merges (enables MT6375 charger stack + HAL symbol providers,
+   FS181X/AW883XX smartpa, AW37501 bias). The fragment's `#ifdef
+   OPLUS_FEATURE_CHG_BASIC` lines are inert: `merge_config.sh` treats `#`
+   lines as comments, no C preprocessing occurs.
+4. `e51595e6`, `57c9f171`, `3fa55763` — `kernel/kleaf/mgk_64_k61.bzl`: apply
+   the same module-list delta the dormant overlay block encoded, keyed on
+   `OPLUS_PLATFORM_INFO == "k6878v1_64"` (the signal that actually works in
+   this flow): declare the two smartpa `.ko` in outs, and remove
+   `cpufreq_bouncing.ko` / `oplus_bsp_task_overload.ko` whose Kconfigs are
+   `not set` in the fragment. `e51595e6` was an intermediate attempt keyed on
+   the empty overlay env; superseded by `57c9f171` (kept in history, no
+   force-push).
+
+### Known cosmetic deviation: `-maybe-dirty` vermagic
+Modules show `vermagic=6.1.134-android14-11-o-maybe-dirty ...`. Source:
+`build/kernel/kleaf/impl/stamp.bzl` falls back to `-maybe-dirty` when no SCM
+metadata is visible in the hermetic sandbox (the bind-mount assembled
+workspace intentionally contains no `.git`). It is a version *stamp*, not a
+dirty tree; all inputs are pinned/hashed. Removing it needs either git
+metadata inside the sandbox or a Kleaf stamp override — deferred, does not
+affect bootability. Stock comparison of vermagic/KMI pending stock images.
+
+### Phase 1 acceptance status
+- [x] Clean build from fresh clone via one documented command (GitHub
+  Actions `workflow_dispatch`; same scripts run locally per commands below).
+- [x] Unmodified driver/source logic: all six deltas are build-system
+  wiring (selectors, include paths, module lists), no functional C changes.
+- [ ] Compare generated `.config` and module list against stock (blocked on
+  user-supplied OFP/full firmware; no RMX5110 stock images in workspace).
+- [ ] Reproducibility re-verification: rerun dispatch and diff dist
+  (pinned inputs make this deterministic except timestamps/SCM stamp).
+
+---
+
 ## Device / source baseline (2026-10-24, Phase 0)
 
 - Device: realme P4 5G, model RMX5110; SoC MediaTek **MT6878** (Dimensity 7400, Mali-G615); kernel platform **k6878v1_64**.
@@ -53,10 +117,12 @@ VENDOR_SRC=$PWD/../vendor-src ci/assemble_workspace.sh   # needs sudo for bind m
 ci/build.sh                                              # VARIANT=userdebug optional
 ci/unmount_workspace.sh
 ```
-Vendor-side required adaptation (branch p4/ci-build in vendor fork):
-mgk_64_k61.bzl drops the absent out-of-tree fpsgo_cus/fpsgo_int labels;
-in-tree fpsgo_v3 (mtk_fpsgo.ko) remains in the device module list.
-First green run: _pending (run 40077687796 in progress at note time)_.
+Vendor-side required adaptations (branch p4/ci-build in vendor fork,
+six commits — see the Phase 1 section above for the full rationale):
+fpsgo label subset fix; charger v2 mediatek_v2 include; k6878 defconfig
+platform selector; k6878 module-list outs delta. First green run:
+**40093351089 (2026-10-24)**. Earlier failed runs are tabulated below;
+each failure produced the fix for the next layer, no source logic changed.
 
 ### Known gaps
 - Prebuilts absent from source repos (toolchain, bazel, jdk, host tools).
@@ -64,16 +130,32 @@ First green run: _pending (run 40077687796 in progress at note time)_.
 - Stock images needed for repack: boot, vendor_boot, init_boot, dtbo, vendor_dlkm, system_dlkm, vbmeta(+system+vendor), misc_info/file_contexts if available.
 
 ## Build / test history
-| Date | Commit(s) | Type | Result | Notes |
-|---|---|---|---|---|
-| 2026-10-24 | baseline | recon only | n/a | Phase 0 report written; no builds yet |
+| Date | Run id | Result | Failure point / notes |
+|---|---|---|---|
+| 2026-10-24 | 40073183167 | fail | /mnt workspace permissions — CI harness fix |
+| 2026-10-24 | 40073615539 | fail | fpsgo DDK label resolution — vendor `56c2b698` |
+| 2026-10-24 | 40074392306 | fail | host toolchain/sysroot gaps — pins + fetch fixes |
+| 2026-10-24 | 40075544386, 40076230638 | fail | gcc sysroot glob — bind-mount assembly |
+| 2026-10-24 | 40077007177 | fail | prebuilt tool assertions (bash not shipped) |
+| 2026-10-24 | 40077687796 | fail | `mtk_panel_ext.h` not found — vendor `c1f2dfac` |
+| 2026-10-24 | 40080774791 | fail | modpost: 6 undefined charger symbols — vendor `b04b43ca` (fragment never merged) |
+| 2026-10-24 | 40083667059 | fail | Kleaf: 2 smartpa .ko built but not in outs |
+| 2026-10-24 | 40087055129 | fail | same — first fix keyed on empty `DEFCONFIG_OVERLAYS` (`e51595e6`, dormant) |
+| 2026-10-24 | 40089977980 | fail | missing `cpufreq_bouncing.ko` / `oplus_bsp_task_overload.ko` in outs — vendor `3fa55763` |
+| 2026-10-24 | **40093351089** | **success** | full dist, 1164 .ko, artifact 12561812768 |
 
 Test matrix (per release): boots to Android; WiFi; BT; calls+mobile data; GPS; camera; audio; touch/display; fingerprint; charging; sensors; no kernel panic/new SELinux denials; 3 clean reboots.
 
 ## Open issues
 1. RMX5110 board ID among 44 `oplus6878_*.dts` — [unverified], needs stock dtbo.
-2. Sandbox host constrained (2 vCPU / 1.9 GiB / no swap) — swap + LTO none for Phase 1.
-3. Exact Bazel version pending prebuilts checkout.
+2. Local sandbox host constrained (2 vCPU / 1.9 GiB); CI (ubuntu-22.04,
+   16 GiB + 8 GiB swap) is the primary builder and is now green.
+3. Resolved: exact Bazel/clang versions come from pinned prebuilts
+   (`ci/pins.env`, clang r487747c).
+4. Stock `.config` / module-list comparison and `-maybe-dirty` vermagic
+   reconciliation blocked on user-supplied stock OFP/full firmware images.
+5. Phase 2 (flashable artifact) not started; requires stock images and the
+   backup/recovery plan before any device-facing step.
 
 ## Cherry-pick / backport log
 (none yet — stock reproduction first; rule: `git cherry-pick -x`, one fix per commit, source URL recorded, upstream Linux stable / AOSP common / MTK CLO / same-SoC OSS kernels only)
