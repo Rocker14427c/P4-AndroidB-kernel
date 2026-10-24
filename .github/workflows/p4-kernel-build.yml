@@ -61,7 +61,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: Rocker14427c/P4-AndroidB-vendor-source
-          ref: master
+          ref: p4/ci-build
           path: vendor-src
           fetch-depth: 1
 
