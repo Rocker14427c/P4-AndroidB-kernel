@@ -44,6 +44,12 @@ jobs:
           sudo swapon /mnt/swapfile
           free -h
 
+      - name: Prepare working directories on /mnt
+        run: |
+          sudo mkdir -p /mnt/buildroot /mnt/prebuilts-store
+          sudo chown -R "$(id -u):$(id -g)" /mnt/buildroot /mnt/prebuilts-store
+          df -h /mnt
+
       - name: Checkout kernel fork
         uses: actions/checkout@v4
         with:
