@@ -32,7 +32,7 @@ echo "workspace =${K}"
 
 mkdir -p "${K}/build" "${K}/prebuilts/clang/host" "${K}/prebuilts/bazel" \
          "${K}/prebuilts/jdk" "${K}/external/python" "${K}/tools" \
-         "${WP}/vendor"
+         "${K}/vendor" "${WP}/vendor"
 
 link() { ln -sfn "$1" "$2"; }
 
@@ -67,7 +67,13 @@ link "${STORE_DIR}/external/bazel-skylib"            "${K}/external/bazel-skylib
 link "${STORE_DIR}/external/stardoc"                 "${K}/external/stardoc"
 link "${STORE_DIR}/external/absl-py"                 "${K}/external/python/absl-py"
 
-# --- out-of-tree modules, referenced as ../vendor relative to workspace ----
+# --- out-of-tree modules -----------------------------------------------------
+# Main-repo labels use //vendor/mediatek/... and //vendor/oplus/... so the
+# module trees must be inside the workspace root...
+link "${VENDOR_SRC}/vendor/mediatek"                 "${K}/vendor/mediatek"
+link "${VENDOR_SRC}/vendor/oplus"                    "${K}/vendor/oplus"
+# ...while WORKSPACE's new_local_repository (@mgk_ko/@mgk_internal) uses
+# "../vendor" relative to the workspace root, so keep the sibling copy too.
 link "${VENDOR_SRC}/vendor/mediatek"                 "${WP}/vendor/mediatek"
 link "${VENDOR_SRC}/vendor/oplus"                    "${WP}/vendor/oplus"
 
