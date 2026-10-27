@@ -111,49 +111,7 @@ jobs:
           # Explicit mapping: under set -u the implicitly injected token is
           # not guaranteed to be present in the step environment.
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          API="https://api.github.com/repos/${GITHUB_REPOSITORY}"
-          AUTH=(-H "Authorization: Bearer ${GITHUB_TOKEN}" -H "Accept: application/vnd.github+json")
-          TAG="${RELEASE_TAG}"
-          # Fetch existing release for this tag, or create one
-          REL="$(curl -s "${AUTH[@]}" "${API}/releases/tags/${TAG}" || true)"
-          if echo "${REL}" | python3 -c 'import json,sys; sys.exit(0 if "id" in json.load(sys.stdin) else 1)'; then
-            REL_ID="$(echo "${REL}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')"
-            echo "Reusing existing release id ${REL_ID}"
-          else
-            BODY="Automated reproducible build (run ${GITHUB_RUN_NUMBER}).
-          Kernel: ${GITHUB_SHA:0:12} (p4/ci-build). See BUILD-MANIFEST inside the images zip."
-            REL="$(curl -s -X POST "${AUTH[@]}" "${API}/releases" \
-              -d "$(python3 -c 'import json,os; print(json.dumps({"tag_name": os.environ["TAG"], "target_commitish": "p4/ci-build", "name": os.environ["TAG"], "body": os.environ["BODY"], "draft": False, "prerelease": False}))')")"
-            REL_ID="$(echo "${REL}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')"
-            echo "Created release id ${REL_ID}"
-          fi
-          upload_asset() {
-            local file="$1" ctype="$2" name old_id
-            name="$(basename "${file}")"
-            # Idempotent re-runs: replace an asset that already exists.
-            old_id="$(curl -s "${AUTH[@]}" "${API}/releases/${REL_ID}/assets" \
-              | NAME="${name}" python3 -c 'import json,sys,os; print(" ".join(str(a["id"]) for a in json.load(sys.stdin) if a["name"] == os.environ["NAME"]))')"
-            for id in ${old_id}; do
-              echo "Replacing existing asset ${name} (id ${id})"
-              curl -s -X DELETE "${AUTH[@]}" "${API}/releases/assets/${id}" >/dev/null
-            done
-            echo "Uploading ${name} ($(du -h "${file}" | cut -f1))"
-            curl -s -X POST "${AUTH[@]}" \
-              -H "Content-Type: ${ctype}" \
-              --data-binary "@${file}" \
-              "https://uploads.github.com/repos/${GITHUB_REPOSITORY}/releases/${REL_ID}/assets?name=${name}" \
-              | python3 -c 'import json,sys; d=json.load(sys.stdin); print(" ->", d.get("name"), d.get("state"), d.get("message",""))'
-          }
-          for f in uploads/release/*; do
-            case "${f}" in
-              *.zip)            upload_asset "${f}" application/zip ;;
-              *.tar.gz)         upload_asset "${f}" application/gzip ;;
-              *.sha256|*.txt)   upload_asset "${f}" text/plain ;;
-              *)                upload_asset "${f}" application/octet-stream ;;
-            esac
-          done
+        run: kernel-src/ci/publish_release.sh uploads/release
 
       - name: Upload workflow artifacts
         if: always()
