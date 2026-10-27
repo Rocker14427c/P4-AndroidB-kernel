@@ -35,10 +35,12 @@ cd "${OUT}/${STAGE}"
 cp "${KDIR}/Image" "${KDIR}/Image.gz" "${KDIR}/Image.lz4" "${KDIR}/System.map" .
 
 # --- build manifest -----------------------------------------------------------
-KO_SAMPLE="$(find "${CDIR}" -name '*.ko' | head -1)"
+# -print -quit avoids SIGPIPE under pipefail (find | head makes the runner
+# treat the early pipe close as a failed step).
+KO_SAMPLE="$(find "${CDIR}" -name '*.ko' -print -quit)"
 VERMAGIC="$("${READELF}" -p .modinfo "${KO_SAMPLE}" 2>/dev/null \
             | tr -d '\0' | sed -n 's/.*vermagic=\([^[:space:]]* .*\)/\1/p' | head -1 || true)"
-UTS_RELEASE="$(strings Image | grep -E '^6\.1\.[0-9]+-android14-[0-9]+-o' | head -1 || true)"
+UTS_RELEASE="$(strings Image | grep -oE '6\.1\.[0-9]+-android14-[0-9]+-o' | head -1 || true)"
 KO_COUNT="$(find "${ROOT}/${DM}" -name '*.ko' | wc -l)"
 CUST_KO_COUNT="$(find "${CDIR}" -name '*.ko' | wc -l)"
 
