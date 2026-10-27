@@ -52,16 +52,29 @@ upload_asset() {
     curl -s -X DELETE "${AUTH[@]}" "${API}/releases/assets/${id}" >/dev/null
   done
   echo "Uploading ${name} ($(du -h "${file}" | cut -f1))"
-  curl -s -X POST "${AUTH[@]}" \
+  local resp http
+  resp="$(mktemp)"
+  http="$(curl -sS --retry 3 --retry-all-errors --connect-timeout 30 \
+    -X POST "${AUTH[@]}" \
     -H "Content-Type: ${ctype}" \
     --data-binary "@${file}" \
-    "https://uploads.github.com/repos/${GITHUB_REPOSITORY}/releases/${REL_ID}/assets?name=${name}" \
-    | python3 -c 'import json,sys; d=json.load(sys.stdin); print(" ->", d.get("name"), d.get("state"), d.get("message",""))'
+    -o "${resp}" -w '%{http_code}' \
+    "https://uploads.github.com/repos/${GITHUB_REPOSITORY}/releases/${REL_ID}/assets?name=${name}")"
+  if [ "${http}" = "201" ]; then
+    python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(" ->", d.get("name"), d.get("state"))' "${resp}"
+  else
+    echo "ERROR uploading ${name}: HTTP ${http}" >&2
+    head -c 500 "${resp}" >&2; echo >&2
+    rm -f "${resp}"
+    return 1
+  fi
+  rm -f "${resp}"
 }
 
+# Smallest first so a flaky large upload cannot block the small metadata.
 shopt -s nullglob
-for f in "${SRC_DIR}"/*; do
-  [ -f "${f}" ] || continue
+mapfile -t FILES < <(find "${SRC_DIR}" -maxdepth 1 -type f -printf '%s\t%p\n' | sort -n | cut -f2-)
+for f in "${FILES[@]}"; do
   case "${f}" in
     *.zip)          upload_asset "${f}" application/zip ;;
     *.tar.gz)       upload_asset "${f}" application/gzip ;;
