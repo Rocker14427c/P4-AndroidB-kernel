@@ -107,6 +107,10 @@ jobs:
 
       - name: Create GitHub release and upload assets
         if: ${{ env.RELEASE_TAG != '' }}
+        env:
+          # Explicit mapping: under set -u the implicitly injected token is
+          # not guaranteed to be present in the step environment.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           API="https://api.github.com/repos/${GITHUB_REPOSITORY}"
@@ -126,8 +130,15 @@ jobs:
             echo "Created release id ${REL_ID}"
           fi
           upload_asset() {
-            local file="$1" ctype="$2" name
+            local file="$1" ctype="$2" name old_id
             name="$(basename "${file}")"
+            # Idempotent re-runs: replace an asset that already exists.
+            old_id="$(curl -s "${AUTH[@]}" "${API}/releases/${REL_ID}/assets" \
+              | NAME="${name}" python3 -c 'import json,sys,os; print(" ".join(str(a["id"]) for a in json.load(sys.stdin) if a["name"] == os.environ["NAME"]))')"
+            for id in ${old_id}; do
+              echo "Replacing existing asset ${name} (id ${id})"
+              curl -s -X DELETE "${AUTH[@]}" "${API}/releases/assets/${id}" >/dev/null
+            done
             echo "Uploading ${name} ($(du -h "${file}" | cut -f1))"
             curl -s -X POST "${AUTH[@]}" \
               -H "Content-Type: ${ctype}" \
