@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: GPL-2.0
 # Reproducible stock-equivalent kernel build for realme P4 5G (RMX5110, MT6878).
-# Runs fully locally (no remote caches, no secrets). Both forks are public,
-# so the vendor checkout needs no token.
+# Runs fully locally (no remote caches, no stored secrets). Both forks are
+# public, so the vendor checkout needs no token. Release uploads use the
+# ephemeral GITHUB_TOKEN that Actions provides; nothing is written to disk.
 name: p4-kernel-build
 
 on:
@@ -18,12 +19,21 @@ on:
         default: 'user'
         type: choice
         options: [user, userdebug]
+      release_tag:
+        description: 'Optional release tag. Empty = build only, no GitHub Release.'
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: write
 
 env:
   # Keep the large working set on the runner's big /mnt disk.
   ROOT: /mnt/buildroot
   STORE_DIR: /mnt/prebuilts-store
   VARIANT: ${{ github.event.inputs.variant || 'user' }}
+  RELEASE_TAG: ${{ github.event.inputs.release_tag || '' }}
 
 jobs:
   build:
@@ -84,7 +94,57 @@ jobs:
           tar -C "$ROOT" -czf uploads/p4-build-logs.tar.gz logs || true
           ls -lh uploads/
 
-      - name: Upload artifacts
+      - name: Stage release assets
+        if: ${{ env.RELEASE_TAG != '' }}
+        run: |
+          export KERNEL_SHA="${GITHUB_SHA}"
+          export VENDOR_SHA="$(git -C vendor-src rev-parse HEAD)"
+          export KERNEL_REF="p4/ci-build" VENDOR_REF="p4/ci-build"
+          kernel-src/ci/package_release.sh
+          # tagged copy of the full dist tarball for permanent release storage
+          cp uploads/p4-kernel-dist.tar.gz \
+             "uploads/release/p4-kernel-dist-${RELEASE_TAG}.tar.gz"
+
+      - name: Create GitHub release and upload assets
+        if: ${{ env.RELEASE_TAG != '' }}
+        run: |
+          set -euo pipefail
+          API="https://api.github.com/repos/${GITHUB_REPOSITORY}"
+          AUTH=(-H "Authorization: Bearer ${GITHUB_TOKEN}" -H "Accept: application/vnd.github+json")
+          TAG="${RELEASE_TAG}"
+          # Fetch existing release for this tag, or create one
+          REL="$(curl -s "${AUTH[@]}" "${API}/releases/tags/${TAG}" || true)"
+          if echo "${REL}" | python3 -c 'import json,sys; sys.exit(0 if "id" in json.load(sys.stdin) else 1)'; then
+            REL_ID="$(echo "${REL}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')"
+            echo "Reusing existing release id ${REL_ID}"
+          else
+            BODY="Automated reproducible build (run ${GITHUB_RUN_NUMBER}).
+          Kernel: ${GITHUB_SHA:0:12} (p4/ci-build). See BUILD-MANIFEST inside the images zip."
+            REL="$(curl -s -X POST "${AUTH[@]}" "${API}/releases" \
+              -d "$(python3 -c 'import json,os; print(json.dumps({"tag_name": os.environ["TAG"], "target_commitish": "p4/ci-build", "name": os.environ["TAG"], "body": os.environ["BODY"], "draft": False, "prerelease": False}))')")"
+            REL_ID="$(echo "${REL}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')"
+            echo "Created release id ${REL_ID}"
+          fi
+          upload_asset() {
+            local file="$1" ctype="$2" name
+            name="$(basename "${file}")"
+            echo "Uploading ${name} ($(du -h "${file}" | cut -f1))"
+            curl -s -X POST "${AUTH[@]}" \
+              -H "Content-Type: ${ctype}" \
+              --data-binary "@${file}" \
+              "https://uploads.github.com/repos/${GITHUB_REPOSITORY}/releases/${REL_ID}/assets?name=${name}" \
+              | python3 -c 'import json,sys; d=json.load(sys.stdin); print(" ->", d.get("name"), d.get("state"), d.get("message",""))'
+          }
+          for f in uploads/release/*; do
+            case "${f}" in
+              *.zip)            upload_asset "${f}" application/zip ;;
+              *.tar.gz)         upload_asset "${f}" application/gzip ;;
+              *.sha256|*.txt)   upload_asset "${f}" text/plain ;;
+              *)                upload_asset "${f}" application/octet-stream ;;
+            esac
+          done
+
+      - name: Upload workflow artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
