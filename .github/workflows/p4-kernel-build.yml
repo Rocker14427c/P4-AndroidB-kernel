@@ -13,14 +13,30 @@ on:
       - 'ci/**'
   workflow_dispatch:
     inputs:
-      variant:
-        description: 'Build variant'
+      mode:
+        description: 'build = compile from source; publish = upload an existing artifact to a release'
         required: true
-        default: 'user'
+        default: build
+        type: choice
+        options: [build, publish]
+      variant:
+        description: 'Build variant (build mode)'
+        required: true
+        default: user
         type: choice
         options: [user, userdebug]
       release_tag:
-        description: 'Optional release tag. Empty = build only, no GitHub Release.'
+        description: 'Release tag. Empty in build mode = build only, no release.'
+        required: false
+        default: ''
+        type: string
+      source_run_id:
+        description: 'publish mode only: workflow run id holding the artifact'
+        required: false
+        default: ''
+        type: string
+      artifact_name:
+        description: 'publish mode only: artifact name (e.g. p4-kernel-18)'
         required: false
         default: ''
         type: string
@@ -37,6 +53,7 @@ env:
 
 jobs:
   build:
+    if: ${{ github.event.inputs.mode != 'publish' }}
     runs-on: ubuntu-22.04
     timeout-minutes: 360
     steps:
@@ -121,3 +138,32 @@ jobs:
           path: uploads/
           retention-days: 30
           if-no-files-found: error
+
+  publish:
+    if: ${{ github.event.inputs.mode == 'publish' }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - name: Checkout kernel fork (release scripts)
+        uses: actions/checkout@v4
+        with:
+          ref: p4/ci-build
+          path: kernel-src
+          fetch-depth: 1
+
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.artifact_name }}
+          run-id: ${{ inputs.source_run_id }}
+          path: uploads
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Show staged files
+        run: find uploads -maxdepth 2 -type f -exec ls -lh {} \;
+
+      - name: Create release and upload assets
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: kernel-src/ci/publish_release.sh uploads/release
