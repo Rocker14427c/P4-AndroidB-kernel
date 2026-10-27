@@ -45,8 +45,35 @@ User builds packaging manually; CI now uploads raw artifacts when
 There is deliberately **no `Image.gz-dtb`**: on this GKI/MTK target DTBs
 are in vendor_boot/dtbo, not appended to the kernel. Kernel-only flashing
 leaves every vendor module and dtbo byte-identical to stock.
-First tagged build: run `40511535658`, tag `rmx5110-6.1.134-r1`
-(kernel CI commit `9eb941d41`).
+
+### Release `rmx5110-6.1.134-r1` — PUBLISHED (2026-10-27)
+URL: https://github.com/Rocker14427c/P4-AndroidB-kernel/releases/tag/rmx5110-6.1.134-r1
+Built by dispatch run `40538420609` (kernel `1beaedce0`, vendor `532fcfad`),
+published via the `publish` mode of `p4-kernel-build.yml`
+(run `40556478322`, release id 425804799). Assets, all state `uploaded`:
+| Asset | Size | Purpose |
+|---|---:|---|
+| `p4-kernel-images-rmx5110-6.1.134-r1.zip` | 44 MB | Image (35 MB), Image.gz (14 MB), Image.lz4 (17 MB), System.map, BUILD-MANIFEST, SHA256SUMS |
+| `p4-vendor-modules-…tar.gz` | 657 MB | all 1164 built .ko (1014 customer) + module-name lists |
+| `p4-kernel-dist-…tar.gz` | 920 MB | full dist incl. vmlinux, vmlinux.symvers, GKI modules |
+| `p4-release-….sha256` | 216 B | SHA-256 of the two primary archives |
+Release-asset checksum re-verified after download (matches published hash).
+UTS release in the artifacts: **`6.1.134-android14-11-o`**; module vermagic:
+`6.1.134-android14-11-o SMP preempt mod_unload modversions aarch64`.
+
+### Workflow modes (one registered workflow, two jobs)
+- `mode=build` (default): full compile; if `release_tag` is set it stages
+  and publishes at the end.
+- `mode=publish`: no rebuild — downloads a named artifact (`source_run_id`
+  + `artifact_name`) and runs `ci/publish_release.sh`. Needed because
+  newly added separate workflow files are not dispatchable until GitHub
+  indexes them, and the local sandbox OOM-kills POST uploads above
+  ~700 MB (1.9 GiB RAM, no swap); hosted runners handle the full set.
+- `ci/publish_release.sh` is idempotent: reuses an existing release and
+  replaces same-named assets. Auth is always the ephemeral GITHUB_TOKEN.
+- Lesson: `set -u` requires an explicit step `env: GITHUB_TOKEN` mapping;
+  shell variables used by Python (`TAG`, `BODY`) must be exported;
+  `find | head` breaks under pipefail (use `find -print -quit`).
 
 ---
 
@@ -186,9 +213,46 @@ each failure produced the fix for the next layer, no source logic changed.
 | 2026-10-24 | 40087055129 | fail | same — first fix keyed on empty `DEFCONFIG_OVERLAYS` (`e51595e6`, dormant) |
 | 2026-10-24 | 40089977980 | fail | missing `cpufreq_bouncing.ko` / `oplus_bsp_task_overload.ko` in outs — vendor `3fa55763` |
 | 2026-10-24 | **40093351089** | **success** | full dist, 1164 .ko, artifact 12561812768 |
-| 2026-10-27 | 40511535658 | running | clean-stamp build (`532fcfad`) + release `rmx5110-6.1.134-r1` (kernel CI `9eb941d41`) |
+| 2026-10-27 | 40511535658 | fail | build OK; release stage SIGPIPE under pipefail — `find\|head` (fixed `8d88e983d`) |
+| 2026-10-27 | 40521274116 | fail | build+stage OK; release step `GITHUB_TOKEN: unbound variable` under set -u (fixed `1beaedce`) |
+| 2026-10-27 | 40538420609 | fail | build+stage OK; release step unexported `TAG` (fixed `682c6acc`); its artifact `p4-kernel-18` is the published source |
+| 2026-10-27 | 40556478322 | **success** | publish-only mode; release `rmx5110-6.1.134-r1` id 425804799, all 4 assets `uploaded` |
+| 2026-10-27 | 40555256017/…54393/…5454393 | running | push-triggered validation builds of the final workflow (no release) |
 
 Test matrix (per release): boots to Android; WiFi; BT; calls+mobile data; GPS; camera; audio; touch/display; fingerprint; charging; sensors; no kernel panic/new SELinux denials; 3 clean reboots.
+
+## Phase 2 — pre-flash requirements (NOT executed; user performs all device steps)
+
+The released kernel is a **kernel-only** payload: replace only the kernel in
+the boot image; do not touch vendor_boot, dtbo, vendor_dlkm, system_dlkm,
+vbmeta, preloader/lk/tee/nvram. Before any flash the user must:
+1. Have an unlocked bootloader (currently externally blocked for this
+   device — resolve outside this workflow); relocking after a custom kernel
+   is not supported.
+2. Back up the current stock `boot.img` (and, for convenience,
+   `init_boot.img`, `vendor_boot.img`, `dtbo.img`) — `fastboot boot` is not
+   available on MediaTek, so a saved boot image is the rollback path:
+   `fastboot flash boot boot-stock.img`.
+3. Keep a full OFP/firmware on PC for emergency reflash with download tool.
+4. Charge >50%, know how to force-power-off and enter recovery/bootloader.
+5. First boot after flashing: expect one longer boot; capture
+   `dmesg`/`logcat` and run the 14-point matrix below before trusting daily
+   use. If a module fails to load, `dmesg` shows either a vermagic flags
+   mismatch (should be impossible per the Phase 1b proof) or a symbol CRC
+   disagreement (would point to a source/toolchain mismatch to investigate).
+
+### Functional mapping for the test matrix (what to watch)
+| Feature | Userspace-facing component | Kernel side (left stock unless noted) |
+|---|---|---|
+| WiFi + hotspot | wlan HAL/hostapd | `wlan_drv_gen4m_6878.ko`, `wmt_chrdev_wifi*.ko`, cfg80211/mac80211 GKI modules |
+| Bluetooth | BT stack | `bt_drv_*.ko`, `btif_drv.ko`, `wmt_*` |
+| Mobile data / VoLTE / calls | RIL, IMS | `ccci_md_all.ko`, `ccci_*`, modem; kernel only provides transport |
+| GPS | location HAL | `gps_drv_*.ko`, `gps_pwr.ko` |
+| Audio (speaker/earpiece/BT audio) | audio HAL/AudioFlinger | `snd-soc-mtk-*`, smartpa `snd-smartpa-aw883xx.ko`, `snd-soc-frsm-i2ca.ko` |
+| Charging | health HAL | `oplus_chg_v2.ko`, `mt6375-charger.ko`, `mt6375-battery.ko` |
+All are vendor modules loaded from verified partitions; with matching
+modversions/CRC they load exactly as on stock. The kernel itself changes no
+defconfig values relative to the published k6878 configuration.
 
 ## Open issues
 1. RMX5110 board ID among 44 `oplus6878_*.dts` — [unverified], needs stock dtbo.
