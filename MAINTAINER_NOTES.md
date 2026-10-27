@@ -217,7 +217,8 @@ each failure produced the fix for the next layer, no source logic changed.
 | 2026-10-27 | 40521274116 | fail | build+stage OK; release step `GITHUB_TOKEN: unbound variable` under set -u (fixed `1beaedce`) |
 | 2026-10-27 | 40538420609 | fail | build+stage OK; release step unexported `TAG` (fixed `682c6acc`); its artifact `p4-kernel-18` is the published source |
 | 2026-10-27 | 40556478322 | **success** | publish-only mode; release `rmx5110-6.1.134-r1` id 425804799, all 4 assets `uploaded` |
-| 2026-10-27 | 40555256017/…54393/…5454393 | running | push-triggered validation builds of the final workflow (no release) |
+| 2026-10-27 | 40555256017, 40556454393 | success | push-triggered validation builds of final workflow (release steps correctly skipped) |
+| 2026-10-27 | 40555426454 | superseded | validation build on an intermediate workflow commit |
 
 Test matrix (per release): boots to Android; WiFi; BT; calls+mobile data; GPS; camera; audio; touch/display; fingerprint; charging; sensors; no kernel panic/new SELinux denials; 3 clean reboots.
 
