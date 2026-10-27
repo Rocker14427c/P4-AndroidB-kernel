@@ -5,6 +5,51 @@ Newest entries at the top. Never put credentials in this file.
 
 ---
 
+## Phase 1b — release artifacts & module-compatibility proof (2026-10-27)
+
+### Why stock WiFi/BT/modem/audio modules keep loading (verified in source)
+The modules on the phone (`/vendor_dlkm/lib/modules`, e.g.
+`wlan_drv_gen4m_6878.ko`, `bt_drv_*.ko`, `ccci_md_all.ko` for
+modem/IMS/VoLTE, `gps_drv_*`, smart-pa audio) were built with
+`CONFIG_MODVERSIONS=y` (gki_defconfig line 102; every built .ko carries a
+`__versions` section and the `modversions` vermagic token). In that mode:
+- `kernel/module/main.c:2008` calls `same_magic(modmagic, vermagic,
+  info->index.vers)`;
+- `kernel/module/version.c` `same_magic()` advances both strings past the
+  first space **when the module has CRCs**, i.e. the entire release token
+  (`6.1.134-android14-11-o[-maybe-dirty]`) is ignored; only
+  `SMP preempt mod_unload modversions aarch64` is compared — identical
+  because the defconfig is the published one;
+- the real gate is `check_version()` symbol CRCs (KMI). Same source
+  release + same pinned clang r487747c => same CRCs; the Kleaf GKI checker
+  also passed in every green run.
+Independent corroboration: same-SoC MT6878 devices (RMX5003) and Pixel GKI
+audits show differing release strings loading fine under modversions.
+
+### Clean version stamp (vendor commit `532fcfad`)
+`build/kernel/kleaf/impl/stamp.bzl` unstamped fallback was
+`echo '-maybe-dirty'`; changed to `true` (no suffix). New UTS release /
+vermagic prefix: **`6.1.134-android14-11-o`** (canonical GKI form).
+External modules inherit the kernel's UTS release, so kernel and all .ko
+stay consistent. No functional effect, only the version string.
+
+### Raw outputs published as a GitHub Release (no AnyKernel3, per user)
+User builds packaging manually; CI now uploads raw artifacts when
+`workflow_dispatch` input `release_tag` is set (ephemeral GITHUB_TOKEN,
+`permissions: contents: write`, nothing stored):
+- `p4-kernel-images-<tag>.zip` — `Image` (35 MB), `Image.gz` (14 MB),
+  `Image.lz4` (17 MB), `System.map`, `BUILD-MANIFEST.txt`, `SHA256SUMS`;
+- `p4-vendor-modules-<tag>.tar.gz` — all 1000+ built .ko + name lists;
+- `p4-kernel-dist-<tag>.tar.gz` — full dist incl. `vmlinux`/symvers;
+- `p4-release-<tag>.sha256`.
+There is deliberately **no `Image.gz-dtb`**: on this GKI/MTK target DTBs
+are in vendor_boot/dtbo, not appended to the kernel. Kernel-only flashing
+leaves every vendor module and dtbo byte-identical to stock.
+First tagged build: run `40511535658`, tag `rmx5110-6.1.134-r1`
+(kernel CI commit `9eb941d41`).
+
+---
+
 ## Phase 1 — clean unmodified build GREEN (2026-10-24)
 
 GitHub Actions run **40093351089** on branch `p4/ci-build`, variant `user`,
@@ -48,14 +93,12 @@ also missing from two platform-keyed selectors. Fixes, all on vendor branch
    the empty overlay env; superseded by `57c9f171` (kept in history, no
    force-push).
 
-### Known cosmetic deviation: `-maybe-dirty` vermagic
-Modules show `vermagic=6.1.134-android14-11-o-maybe-dirty ...`. Source:
-`build/kernel/kleaf/impl/stamp.bzl` falls back to `-maybe-dirty` when no SCM
-metadata is visible in the hermetic sandbox (the bind-mount assembled
-workspace intentionally contains no `.git`). It is a version *stamp*, not a
-dirty tree; all inputs are pinned/hashed. Removing it needs either git
-metadata inside the sandbox or a Kleaf stamp override — deferred, does not
-affect bootability. Stock comparison of vermagic/KMI pending stock images.
+### Version stamp history: `-maybe-dirty` removed (2026-10-27)
+Run 40093351089 modules showed `vermagic=6.1.134-android14-11-o-maybe-dirty`.
+That was the Kleaf unstamped fallback in `stamp.bzl` for a sandbox without
+git metadata — a version *stamp*, never a dirty tree, and harmless under
+CONFIG_MODVERSIONS (see Phase 1b proof). Vendor commit `532fcfad` removes
+the suffix; current builds report plain `6.1.134-android14-11-o`.
 
 ### Phase 1 acceptance status
 - [x] Clean build from fresh clone via one documented command (GitHub
@@ -143,6 +186,7 @@ each failure produced the fix for the next layer, no source logic changed.
 | 2026-10-24 | 40087055129 | fail | same — first fix keyed on empty `DEFCONFIG_OVERLAYS` (`e51595e6`, dormant) |
 | 2026-10-24 | 40089977980 | fail | missing `cpufreq_bouncing.ko` / `oplus_bsp_task_overload.ko` in outs — vendor `3fa55763` |
 | 2026-10-24 | **40093351089** | **success** | full dist, 1164 .ko, artifact 12561812768 |
+| 2026-10-27 | 40511535658 | running | clean-stamp build (`532fcfad`) + release `rmx5110-6.1.134-r1` (kernel CI `9eb941d41`) |
 
 Test matrix (per release): boots to Android; WiFi; BT; calls+mobile data; GPS; camera; audio; touch/display; fingerprint; charging; sensors; no kernel panic/new SELinux denials; 3 clean reboots.
 
@@ -152,10 +196,16 @@ Test matrix (per release): boots to Android; WiFi; BT; calls+mobile data; GPS; c
    16 GiB + 8 GiB swap) is the primary builder and is now green.
 3. Resolved: exact Bazel/clang versions come from pinned prebuilts
    (`ci/pins.env`, clang r487747c).
-4. Stock `.config` / module-list comparison and `-maybe-dirty` vermagic
-   reconciliation blocked on user-supplied stock OFP/full firmware images.
-5. Phase 2 (flashable artifact) not started; requires stock images and the
-   backup/recovery plan before any device-facing step.
+4. Stock `.config` / module-list byte comparison still blocked on
+   user-supplied stock OFP/full firmware images. Vermagic prefix no longer
+   differs; KMI/CRC equivalence is argued from identical source+toolchain,
+   not yet measured against stock modules (would need one stock .ko).
+5. Device-facing packaging: user chose raw release outputs over AnyKernel3
+   (delivered, see Phase 1b). Any actual flashing still needs the user's
+   backup/recovery plan; bootloader unlock remains externally blocked.
+6. Workspace snapshots in the build sandbox drop `.git` and binary
+   artifacts — always re-clone from the forks; GitHub releases/artifacts
+   are the only durable artifact store.
 
 ## Cherry-pick / backport log
 (none yet — stock reproduction first; rule: `git cherry-pick -x`, one fix per commit, source URL recorded, upstream Linux stable / AOSP common / MTK CLO / same-SoC OSS kernels only)
